@@ -20,7 +20,7 @@ main{padding:0 10px 30px;max-width:900px;margin:auto}
 .tot{font-size:1.6rem;font-weight:700;margin:10px 0}
 .pay button{flex:1;padding:14px}#fvb{display:none}#fvb input{width:100%;margin:4px 0}
 table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid var(--line)}.z{color:var(--bad);font-weight:700}
-#msg{padding:6px 10px;font-size:.85rem;color:var(--mut)}.lo{color:#b26a00;font-weight:700}.z0{opacity:.55}
+#msg{padding:6px 10px;font-size:.85rem;color:var(--mut)}.kl{font-size:1.15rem;font-weight:700;margin:4px 0}.lo{color:#b26a00;font-weight:700}.z0{opacity:.55}
 </style></head><body>
 <header><select id="ev"></select><button id="imp">Import pliku</button><button id="sync">Sync (<span id="pend">0</span>)</button><button id="cfg">Ustawienia</button>
 <input type="file" id="file" hidden accept=".xlsx,.xls,.csv"></header>
@@ -31,6 +31,7 @@ table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid
  <div class="row"><button id="newp">+ Produkt spoza listy</button></div><div id="cam"></div><div id="res"></div>
  <div id="cart"></div><div class="tot">Razem: <span id="sum">0,00</span> zł</div>
  <div class="row pay"><button data-p="Gotówka">Gotówka</button><button data-p="Karta">Karta</button></div>
+ <input id="kl" placeholder="Imię i nazwisko klienta (gdy bez NIP)" style="width:100%;margin:6px 0">
  <label><input type="checkbox" id="fv"> Faktura VAT</label>
  <div id="fvb"><div class="row"><input id="nip" placeholder="NIP" inputmode="numeric"><button id="gus">Pobierz dane</button></div>
  <input id="firma" placeholder="Firma"><input id="adres" placeholder="Adres"><input id="mail" placeholder="E-mail do faktury"></div>
@@ -45,6 +46,7 @@ const $=s=>document.querySelector(s);
 let S=JSON.parse(localStorage.ft||'{"url":"","tok":"","ev":"","evs":[],"items":[],"pend":[],"tot":{}}'),cart=[],pay='',busy=0;
 const save=()=>localStorage.ft=JSON.stringify(S);
 const zl=n=>n.toFixed(2).replace('.',',');
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const msg=t=>$('#msg').textContent=t;
 async function api(p,body){
   if(!S.url)throw 'Najpierw wpisz adres i token w Ustawieniach';
@@ -60,9 +62,9 @@ function add(e){const i=find(String(e).replace(/\D/g,''));if(!i){msg('Kod '+e+' 
 const q=(k,d)=>{const n=cart[k].qty+d;if(n<1){cart.splice(k,1);return render()}if(d>0&&!chk(find(cart[k].ean),n))return;cart[k].qty=n;render()};
 function hist(){
   const P=S.pend.filter(s=>s.ev==S.ev),done=new Set(P.map(s=>s.stornoOf).filter(Boolean));
-  const L=[...P.map(s=>({...s,sum:s.lines.reduce((a,l)=>a+l.qty*l.price,0),storno:!!s.stornoOf,stornoed:false,fv:!!s.fv,wait:1})),...(S.sales||[]).filter(s=>!P.some(p=>p.id==s.id))].sort((a,b)=>b.ts-a.ts);
+  const L=[...P.map(s=>({...s,sum:s.lines.reduce((a,l)=>a+l.qty*l.price,0),storno:!!s.stornoOf,stornoed:false,fv:!!s.fv,nip:s.fv?s.fv.nip:'',klient:[s.fv&&s.fv.firma,s.kl].filter(Boolean).join(' · '),wait:1})),...(S.sales||[]).filter(s=>!P.some(p=>p.id==s.id))].sort((a,b)=>b.ts-a.ts);
   $('#hl').innerHTML=L.map(s=>{const x=s.stornoed||done.has(s.id),ok=!s.storno&&!x;
-    return`<div class="r${x||s.storno?' z0':''}"><b>${new Date(s.ts).toLocaleTimeString().slice(0,5)}</b> · ${s.pay} · ${zl(s.sum)} zł${s.fv?' · FV':''}${s.wait?' · czeka na sync':''}${s.storno?' · STORNO':''}${x?' · anulowana':''}<br><small>${s.lines.map(l=>l.name+' ×'+l.qty).join('; ')}</small>${ok?` <button onclick="stor('${s.id}')">Storno</button>`:''}</div>`}).join('')||'<p class="m">Brak sprzedaży w tym evencie.</p>'}
+    return`<div class="r${x||s.storno?' z0':''}"><b>${new Date(s.ts).toLocaleTimeString().slice(0,5)}</b> · ${s.pay} · ${zl(s.sum)} zł${s.fv?' · FV':''}${s.wait?' · czeka na sync':''}${s.storno?' · STORNO':''}${x?' · anulowana':''}${s.nip||s.klient?`<div class="kl">${s.nip?'NIP '+s.nip:''}${s.nip&&s.klient?' · ':''}${esc(s.klient||'')}</div>`:'<br>'}<small>${s.lines.map(l=>l.name+' ×'+l.qty).join('; ')}</small>${ok?` <button onclick="stor('${s.id}')">Storno</button>`:''}</div>`}).join('')||'<p class="m">Brak sprzedaży w tym evencie.</p>'}
 function stor(id){const s=S.pend.find(p=>p.id==id)||(S.sales||[]).find(p=>p.id==id);if(!s||!confirm('Anulować tę sprzedaż? Towar wróci na stan.'))return;
   S.pend.push({id:crypto.randomUUID(),ts:Date.now(),ev:S.ev,pay:s.pay,fv:null,stornoOf:id,lines:s.lines.map(l=>({...l,qty:-l.qty}))});save();render();sync()}
 const pr=(k,v)=>{cart[k].price=parseFloat(String(v).replace(',','.'))||0;render()};
@@ -99,8 +101,8 @@ $('#gus').onclick=async()=>{try{const j=await api({a:'nip',nip:$('#nip').value})
 $('#done').onclick=()=>{if(!cart.length)return alert('Koszyk jest pusty – kliknij produkt na liście wyników albo zeskanuj kod.');if(!pay)return alert('Wybierz Gotówka lub Karta');
   const fv=$('#fv').checked?{nip:$('#nip').value.replace(/\D/g,''),firma:$('#firma').value,adres:$('#adres').value,email:$('#mail').value}:null;
   if(fv&&!fv.nip)return alert('Podaj NIP');
-  S.pend.push({id:crypto.randomUUID(),ts:Date.now(),ev:S.ev,pay,fv,lines:cart.map(({sku,name,ean,qty,price})=>({sku,name,ean,qty,price}))});
-  save();cart=[];pay='';$('#fv').checked=false;$('#fvb').style.display='none';['nip','firma','adres','mail'].forEach(i=>$('#'+i).value='');render();sync()};
+  S.pend.push({id:crypto.randomUUID(),ts:Date.now(),ev:S.ev,pay,fv,kl:$('#kl').value.trim(),lines:cart.map(({sku,name,ean,qty,price})=>({sku,name,ean,qty,price}))});
+  save();cart=[];pay='';$('#fv').checked=false;$('#fvb').style.display='none';['nip','firma','adres','mail','kl'].forEach(i=>$('#'+i).value='');render();sync()};
 let sc,last='',lt=0;
 $('#scan').onclick=async()=>{if(sc){await sc.stop();sc=null;$('#cam').style.display='none';$('#scan').textContent='Skanuj kamerą';return}
   $('#cam').style.display='block';$('#scan').textContent='Zatrzymaj skaner';
