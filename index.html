@@ -20,7 +20,8 @@ main{padding:0 10px 30px;max-width:900px;margin:auto}
 .tot{font-size:1.6rem;font-weight:700;margin:10px 0}
 .pay button{flex:1;padding:14px}#fvb{display:none}#fvb input{width:100%;margin:4px 0}
 table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid var(--line)}.z{color:var(--bad);font-weight:700}
-#msg{padding:6px 10px;font-size:.85rem;color:var(--mut)}.kl{font-size:1.15rem;font-weight:700;margin:4px 0}.lo{color:#b26a00;font-weight:700}.z0{opacity:.55}
+#msg{padding:6px 10px;font-size:.85rem;color:var(--mut)}#qr{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);align-items:center;justify-content:center;z-index:9}#qr .box{background:#fff;padding:16px;border-radius:12px;text-align:center}#qr img{width:min(80vw,420px);image-rendering:pixelated}
+.kl{font-size:1.15rem;font-weight:700;margin:4px 0}.lo{color:#b26a00;font-weight:700}.z0{opacity:.55}
 </style></head><body>
 <header><select id="ev"></select><button id="imp">Import pliku</button><button id="sync">Sync (<span id="pend">0</span>)</button><button id="cfg">Ustawienia</button>
 <input type="file" id="file" hidden accept=".xlsx,.xls,.csv"></header>
@@ -35,15 +36,17 @@ table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid
  <label><input type="checkbox" id="fv"> Faktura VAT</label>
  <div id="fvb"><div class="row"><input id="nip" placeholder="NIP" inputmode="numeric"><button id="gus">Pobierz dane</button></div>
  <input id="firma" placeholder="Firma"><input id="adres" placeholder="Adres"><input id="mail" placeholder="E-mail do faktury"></div>
- <div class="row"><button id="done" class="p" style="flex:1;padding:16px">Zatwierdź sprzedaż</button></div>
+ <div class="row"><button id="toq" style="flex:1;padding:16px">Do kasy (QR)</button><button id="done" class="p" style="flex:1;padding:16px">Zatwierdź sprzedaż</button></div>
 </main>
 <main id="stock" style="display:none"><div class="tot m" id="tt"></div><input id="flt" placeholder="Filtruj…" style="width:100%;margin-bottom:8px"><table id="tb"></table></main>
 <main id="hist" style="display:none"><div id="hl"></div></main>
+<div id="qr"></div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-let S=JSON.parse(localStorage.ft||'{"url":"","tok":"","ev":"","evs":[],"items":[],"pend":[],"tot":{}}'),cart=[],pay='',busy=0;
+let S=JSON.parse(localStorage.ft||'{"url":"","tok":"","ev":"","evs":[],"items":[],"pend":[],"tot":{}}'),cart=[],pay='',busy=0,oid='';
 const save=()=>localStorage.ft=JSON.stringify(S);
 const zl=n=>n.toFixed(2).replace('.',',');
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -52,7 +55,7 @@ async function api(p,body){
   if(!S.url)throw 'Najpierw wpisz adres i token w Ustawieniach';
   const r=body?await fetch(S.url,{method:'POST',body:JSON.stringify({...body,t:S.tok})}):await fetch(S.url+'?'+new URLSearchParams({...p,t:S.tok}));
   const j=await r.json();if(j.error)throw j.error;return j}
-const pq=e=>S.pend.filter(s=>s.ev==S.ev).reduce((a,s)=>a+s.lines.filter(l=>l.ean==e).reduce((b,l)=>b+l.qty,0),0);
+const pq=e=>[...S.pend,...(S.orders||[])].filter(s=>s.ev==S.ev).reduce((a,s)=>a+s.lines.filter(l=>l.ean==e).reduce((b,l)=>b+l.qty,0),0);
 const find=e=>S.items.find(i=>i.ean==e);
 const left=i=>(Number(i.left)||0)-pq(i.ean);
 function chk(i,n){const r=left(i)-n;if(r<0&&!confirm('Brak na stanie ('+left(i)+' szt.): '+i.name+'. Sprzedać mimo to?'))return 0;msg(r>=0&&r<=2?'Uwaga: po sprzedaży zostanie '+r+' szt. – '+i.name:'');return 1}
@@ -63,13 +66,32 @@ const q=(k,d)=>{const n=cart[k].qty+d;if(n<1){cart.splice(k,1);return render()}i
 function hist(){
   const P=S.pend.filter(s=>s.ev==S.ev),done=new Set(P.map(s=>s.stornoOf).filter(Boolean));
   const L=[...P.map(s=>({...s,sum:s.lines.reduce((a,l)=>a+l.qty*l.price,0),storno:!!s.stornoOf,stornoed:false,fv:!!s.fv,nip:s.fv?s.fv.nip:'',klient:[s.fv&&s.fv.firma,s.kl].filter(Boolean).join(' · '),wait:1})),...(S.sales||[]).filter(s=>!P.some(p=>p.id==s.id))].sort((a,b)=>b.ts-a.ts);
-  $('#hl').innerHTML=L.map(s=>{const x=s.stornoed||done.has(s.id),ok=!s.storno&&!x;
+  $('#hl').innerHTML=ordH()+L.map(s=>{const x=s.stornoed||done.has(s.id),ok=!s.storno&&!x;
     return`<div class="r${x||s.storno?' z0':''}"><b>${new Date(s.ts).toLocaleTimeString().slice(0,5)}</b> · ${s.pay} · ${zl(s.sum)} zł${s.fv?' · FV':''}${s.wait?' · czeka na sync':''}${s.storno?' · STORNO':''}${x?' · anulowana':''}${s.nip||s.klient?`<div class="kl">${s.nip?'NIP '+s.nip:''}${s.nip&&s.klient?' · ':''}${esc(s.klient||'')}</div>`:'<br>'}<small>${s.lines.map(l=>l.name+' ×'+l.qty).join('; ')}</small>${ok?` <button onclick="stor('${s.id}')">Storno</button>`:''}</div>`}).join('')||'<p class="m">Brak sprzedaży w tym evencie.</p>'}
+function ordH(){return(S.orders||[]).filter(o=>o.ev==S.ev).map(o=>`<div class="r"><b>Do kasy</b> · ${zl(o.lines.reduce((a,l)=>a+l.qty*l.price,0))} zł${o.fv?' · FV':''}${o.kl||o.fv?`<div class="kl">${o.fv?'NIP '+o.fv.nip:''}${o.fv&&o.kl?' · ':''}${esc(o.kl||'')}</div>`:'<br>'}<small>${o.lines.map(l=>l.name+' ×'+l.qty).join('; ')}</small> <button onclick="showQR('${o.id}')">Pokaż QR</button> <button onclick="delo('${o.id}')">Usuń</button></div>`).join('')}
+function delo(id){if(!confirm('Usunąć zamówienie? Towar wróci na stan.'))return;S.orders=S.orders.filter(o=>o.id!=id);save();render()}
+function showQR(id){const o=S.orders.find(x=>x.id==id);if(!o)return;
+  try{const j=JSON.stringify({i:o.id,e:o.ev,k:o.kl,f:o.fv?[o.fv.nip,o.fv.firma,o.fv.adres,o.fv.email]:0,l:o.lines.map(l=>[l.ean,l.qty,l.price])});
+    const q=qrcode(0,'L');q.addData('FT1:'+btoa(unescape(encodeURIComponent(j))));q.make();
+    $('#qr').innerHTML='<div class="box">'+q.createImgTag(6,4)+'<p><b>Pokaż ten kod w kasie</b></p><button onclick="$(\'#qr\').style.display=\'none\'">Zamknij</button></div>';$('#qr').style.display='flex'}
+  catch(e){alert('Nie udało się utworzyć kodu QR (za dużo pozycji albo biblioteka się nie załadowała).')}}
+function order(t){try{const o=JSON.parse(decodeURIComponent(escape(atob(t.slice(4)))));
+  if(S.pend.some(s=>s.id==o.i)||(S.sales||[]).some(s=>s.id==o.i)){msg('To zamówienie jest już opłacone');return}
+  if(o.e!=S.ev&&!confirm('Zamówienie z eventu "'+o.e+'", a wybrany jest "'+S.ev+'". Wczytać mimo to?'))return;
+  cart=o.l.map(([ean,qty,price])=>{const i=find(String(ean))||{};return{sku:i.sku||'',name:i.name||('EAN '+ean),ean:String(ean),qty,price}});
+  oid=o.i;$('#kl').value=o.k||'';
+  if(o.f){$('#fv').checked=true;$('#fvb').style.display='block';[$('#nip').value,$('#firma').value,$('#adres').value,$('#mail').value]=o.f}
+  msg('Wczytano zamówienie – wybierz Gotówka/Karta i zatwierdź');render()}catch(e){msg('Nieprawidłowy kod zamówienia')}}
+$('#toq').onclick=()=>{if(!cart.length)return alert('Koszyk jest pusty');
+  const fv=$('#fv').checked?{nip:$('#nip').value.replace(/\D/g,''),firma:$('#firma').value,adres:$('#adres').value,email:$('#mail').value}:null;
+  if(fv&&!fv.nip)return alert('Podaj NIP');
+  const o={id:crypto.randomUUID(),ev:S.ev,ts:Date.now(),kl:$('#kl').value.trim(),fv,lines:cart.map(({sku,name,ean,qty,price})=>({sku,name,ean,qty,price}))};
+  (S.orders=S.orders||[]).push(o);save();cart=[];pay='';$('#fv').checked=false;$('#fvb').style.display='none';['nip','firma','adres','mail','kl'].forEach(i=>$('#'+i).value='');render();showQR(o.id)};
 function stor(id){const s=S.pend.find(p=>p.id==id)||(S.sales||[]).find(p=>p.id==id);if(!s||!confirm('Anulować tę sprzedaż? Towar wróci na stan.'))return;
   S.pend.push({id:crypto.randomUUID(),ts:Date.now(),ev:S.ev,pay:s.pay,fv:null,stornoOf:id,lines:s.lines.map(l=>({...l,qty:-l.qty}))});save();render();sync()}
 const pr=(k,v)=>{cart[k].price=parseFloat(String(v).replace(',','.'))||0;render()};
 function render(){
-  $('#pend').textContent=S.pend.length;hist();
+  $('#pend').textContent=S.pend.length;if(!cart.length)oid='';hist();
   $('#cart').innerHTML=cart.map((l,k)=>`<div class="line"><div>${l.name}<br><small>${l.sku}</small></div>
   <div><button onclick="q(${k},-1)">−</button> <b>${l.qty}</b> <button onclick="q(${k},1)">+</button></div>
   <input value="${l.price}" onchange="pr(${k},this.value)" inputmode="decimal"></div>`).join('')||'<p class="m">Zeskanuj produkt.</p>';
@@ -83,7 +105,7 @@ function render(){
 async function sync(){if(!S.ev||busy)return;busy=1;msg('Synchronizacja…');
   try{const sales=S.pend.filter(s=>s.ev==S.ev);
     const j=sales.length?await api(0,{a:'sales',ev:S.ev,sales}):await api({a:'event',ev:S.ev});
-    S.pend=S.pend.filter(s=>!sales.includes(s));S.items=j.items;S.tot=j.tot;S.sales=j.sales||[];msg('Zsynchronizowano '+new Date().toLocaleTimeString())}
+    S.pend=S.pend.filter(s=>!sales.includes(s));S.items=j.items;S.tot=j.tot;S.sales=j.sales||[];S.orders=(S.orders||[]).filter(o=>!S.sales.some(s=>s.id==o.id));msg('Zsynchronizowano '+new Date().toLocaleTimeString())}
   catch(e){msg('Offline / błąd: '+e+' – sprzedaż czeka w kolejce')}
   busy=0;save();render()}
 async function loadEvs(){try{S.evs=(await api({a:'events'})).events}catch(e){}
@@ -101,13 +123,13 @@ $('#gus').onclick=async()=>{try{const j=await api({a:'nip',nip:$('#nip').value})
 $('#done').onclick=()=>{if(!cart.length)return alert('Koszyk jest pusty – kliknij produkt na liście wyników albo zeskanuj kod.');if(!pay)return alert('Wybierz Gotówka lub Karta');
   const fv=$('#fv').checked?{nip:$('#nip').value.replace(/\D/g,''),firma:$('#firma').value,adres:$('#adres').value,email:$('#mail').value}:null;
   if(fv&&!fv.nip)return alert('Podaj NIP');
-  S.pend.push({id:crypto.randomUUID(),ts:Date.now(),ev:S.ev,pay,fv,kl:$('#kl').value.trim(),lines:cart.map(({sku,name,ean,qty,price})=>({sku,name,ean,qty,price}))});
+  S.pend.push({id:oid||crypto.randomUUID(),ts:Date.now(),ev:S.ev,pay,fv,kl:$('#kl').value.trim(),lines:cart.map(({sku,name,ean,qty,price})=>({sku,name,ean,qty,price}))});
   save();cart=[];pay='';$('#fv').checked=false;$('#fvb').style.display='none';['nip','firma','adres','mail','kl'].forEach(i=>$('#'+i).value='');render();sync()};
 let sc,last='',lt=0;
 $('#scan').onclick=async()=>{if(sc){await sc.stop();sc=null;$('#cam').style.display='none';$('#scan').textContent='Skanuj kamerą';return}
   $('#cam').style.display='block';$('#scan').textContent='Zatrzymaj skaner';
-  const F=Html5QrcodeSupportedFormats;sc=new Html5Qrcode('cam',{formatsToSupport:[F.EAN_13,F.EAN_8,F.CODE_128]});
-  sc.start({facingMode:'environment'},{fps:10,qrbox:{width:280,height:120}},t=>{const n=Date.now();if(t==last&&n-lt<1500)return;last=t;lt=n;add(t)},()=>{}).catch(e=>alert('Kamera: '+e))};
+  const F=Html5QrcodeSupportedFormats;sc=new Html5Qrcode('cam',{formatsToSupport:[F.EAN_13,F.EAN_8,F.CODE_128,F.QR_CODE]});
+  sc.start({facingMode:'environment'},{fps:10,qrbox:{width:300,height:220}},t=>{const n=Date.now();if(t==last&&n-lt<1500)return;last=t;lt=n;t.startsWith('FT1:')?order(t):add(t)},()=>{}).catch(e=>alert('Kamera: '+e))};
 $('#man').onkeydown=e=>{if(e.key!='Enter')return;const v=e.target.value.trim();e.target.value='';if(!v)return;if(find(v))return add(v);
   const m=S.items.filter(i=>(i.sku+i.name).toLowerCase().includes(v.toLowerCase())).slice(0,8);
   $('#res').innerHTML=m.map(i=>`<div class="r" onclick="add('${i.ean}');this.parentNode.innerHTML=''">${i.name} · zostało ${left(i)} · ${zl(i.price)} zł</div>`).join('')||'<p class="m">Brak wyników</p>'};
