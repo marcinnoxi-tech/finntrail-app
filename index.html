@@ -20,6 +20,7 @@ main{padding:0 10px 30px;max-width:900px;margin:auto}
 .tot{font-size:1.6rem;font-weight:700;margin:10px 0}
 .pay button{flex:1;padding:14px}#fvb{display:none}#fvb input{width:100%;margin:4px 0}
 table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid var(--line)}.z{color:var(--bad);font-weight:700}
+#pi{display:none;background:#fff;border:2px solid var(--acc);border-radius:10px;padding:10px 12px;margin:8px 0}#pi .pn{font-weight:600}#pi .pp{display:flex;gap:20px;flex-wrap:wrap;font-size:1.35rem;margin-top:4px}#pi .pp span:first-child{color:var(--mut)}
 #msg{padding:6px 10px;font-size:.85rem;color:var(--mut)}#qr{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);align-items:center;justify-content:center;z-index:9}#qr .box{background:#fff;padding:16px;border-radius:12px;text-align:center}#qr img{width:min(80vw,420px);image-rendering:pixelated}
 .kl{font-size:1.15rem;font-weight:700;margin:4px 0}.lo{color:#b26a00;font-weight:700}.z0{opacity:.55}
 </style></head><body>
@@ -28,8 +29,9 @@ table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid
 <div id="msg"></div>
 <nav><button data-t="sell" class="on">Sprzedaż</button><button data-t="stock">Stany</button><button data-t="hist">Historia</button></nav>
 <main id="sell">
+ <div class="row"><label style="white-space:nowrap">Rabat <input id="dp" type="number" min="0" max="90" step="1" style="width:72px;flex:none"> %</label></div>
  <div class="row"><button id="scan" class="p">Skanuj kamerą</button><label style="white-space:nowrap"><input type="checkbox" id="auto" checked style="padding:0"> Zamykaj po skanie</label><input id="man" placeholder="EAN, SKU lub nazwa + Enter"></div>
- <div class="row"><button id="newp">+ Produkt spoza listy</button></div><div id="cam"></div><div id="res"></div>
+ <div class="row"><button id="newp">+ Produkt spoza listy</button></div><div id="pi"></div><div id="cam"></div><div id="res"></div>
  <div id="cart"></div><div class="tot">Razem: <span id="sum">0,00</span> zł</div>
  <div class="row pay"><button data-p="Gotówka">Gotówka</button><button data-p="Karta">Karta</button></div>
  <input id="kl" placeholder="Imię i nazwisko klienta (gdy bez NIP)" style="width:100%;margin:6px 0">
@@ -49,6 +51,8 @@ const $=s=>document.querySelector(s);
 let S=JSON.parse(localStorage.ft||'{"url":"","tok":"","ev":"","evs":[],"items":[],"pend":[],"tot":{}}'),cart=[],pay='',busy=0,oid='';
 const save=()=>localStorage.ft=JSON.stringify(S);
 const zl=n=>n.toFixed(2).replace('.',',');
+const D=()=>({p:(S.disc&&S.disc.p!=null)?S.disc.p:15});
+function dpr(p){return Math.floor(Math.round(p*(100-D().p))/100+1e-9)}
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const msg=t=>$('#msg').textContent=t;
 async function api(p,body){
@@ -61,7 +65,9 @@ const left=i=>(Number(i.left)||0)-pq(i.ean);
 function chk(i,n){const r=left(i)-n;if(r<0&&!confirm('Brak na stanie ('+left(i)+' szt.): '+i.name+'. Sprzedać mimo to?'))return 0;msg(r>=0&&r<=2?'Uwaga: po sprzedaży zostanie '+r+' szt. – '+i.name:'');return 1}
 function add(e){const i=find(String(e).replace(/\D/g,''));if(!i){msg('Kod '+e+' nie jest w tym evencie – użyj „+ Produkt spoza listy"');return}
   const l=cart.find(x=>x.ean==i.ean),n=(l?l.qty:0)+1;if(!chk(i,n))return;
-  l?l.qty=n:cart.push({sku:i.sku,name:i.name,ean:i.ean,price:i.price,qty:1});render()}
+  l?l.qty=n:cart.push({sku:i.sku,name:i.name,ean:i.ean,price:dpr(i.price),orig:i.price,qty:1});render();pinfo(i)}
+function pinfo(i){const e=$('#pi');e.innerHTML=`<div class="pn">${esc(i.name)}</div><div class="pp"><span>Cena <b>${zl(i.price)} zł</b></span><span>Rabat −${D().p}% <b>${zl(dpr(i.price))} zł</b></span></div>`;e.style.display='block'}
+function tgl(k){const l=cart[k];if(l.price==l.orig){l.price=dpr(l.orig);l.man=0}else{l.price=l.orig;l.man=1}render()}
 const q=(k,d)=>{const n=cart[k].qty+d;if(n<1){cart.splice(k,1);return render()}if(d>0&&!chk(find(cart[k].ean),n))return;cart[k].qty=n;render()};
 function hist(){
   const P=S.pend.filter(s=>s.ev==S.ev),done=new Set(P.map(s=>s.stornoOf).filter(Boolean));
@@ -78,7 +84,7 @@ function showQR(id){const o=S.orders.find(x=>x.id==id);if(!o)return;
 function order(t){try{const o=JSON.parse(decodeURIComponent(escape(atob(t.slice(4)))));
   if(S.pend.some(s=>s.id==o.i)||(S.sales||[]).some(s=>s.id==o.i)){msg('To zamówienie jest już opłacone');return}
   if(o.e!=S.ev&&!confirm('Zamówienie z eventu "'+o.e+'", a wybrany jest "'+S.ev+'". Wczytać mimo to?'))return;
-  cart=o.l.map(([ean,qty,price])=>{const i=find(String(ean))||{};return{sku:i.sku||'',name:i.name||('EAN '+ean),ean:String(ean),qty,price}});
+  cart=o.l.map(([ean,qty,price])=>{const i=find(String(ean))||{};return{sku:i.sku||'',name:i.name||('EAN '+ean),ean:String(ean),qty,price,orig:i.price,man:1}});
   oid=o.i;$('#kl').value=o.k||'';
   if(o.f){$('#fv').checked=true;$('#fvb').style.display='block';[$('#nip').value,$('#firma').value,$('#adres').value,$('#mail').value]=o.f}
   msg('Wczytano zamówienie – wybierz Gotówka/Karta i zatwierdź');render()}catch(e){msg('Nieprawidłowy kod zamówienia')}}
@@ -89,11 +95,11 @@ $('#toq').onclick=()=>{if(!cart.length)return alert('Koszyk jest pusty');
   (S.orders=S.orders||[]).push(o);save();cart=[];pay='';$('#fv').checked=false;$('#fvb').style.display='none';['nip','firma','adres','mail','kl'].forEach(i=>$('#'+i).value='');render();showQR(o.id)};
 function stor(id){const s=S.pend.find(p=>p.id==id)||(S.sales||[]).find(p=>p.id==id);if(!s||!confirm('Anulować tę sprzedaż? Towar wróci na stan.'))return;
   S.pend.push({id:crypto.randomUUID(),ts:Date.now(),ev:S.ev,pay:s.pay,fv:null,stornoOf:id,lines:s.lines.map(l=>({...l,qty:-l.qty}))});save();render();sync()}
-const pr=(k,v)=>{cart[k].price=parseFloat(String(v).replace(',','.'))||0;render()};
+const pr=(k,v)=>{cart[k].price=parseFloat(String(v).replace(',','.'))||0;cart[k].man=1;render()};
 function render(){
-  $('#pend').textContent=S.pend.length;if(!cart.length)oid='';hist();
-  $('#cart').innerHTML=cart.map((l,k)=>`<div class="line"><div>${l.name}<br><small>${l.sku}</small></div>
-  <div><button onclick="q(${k},-1)">−</button> <b>${l.qty}</b> <button onclick="q(${k},1)">+</button></div>
+  $('#pend').textContent=S.pend.length;if(!cart.length){oid='';$('#pi').style.display='none'}hist();
+  $('#cart').innerHTML=cart.map((l,k)=>`<div class="line"><div>${l.name}<br><small>${l.sku}${l.orig!=null&&l.orig!=l.price?` · <s>${zl(l.orig)} zł</s>${l.man?'':' <b>rabat −'+D().p+'%</b>'}`:''}</small></div>
+  <div><button onclick="q(${k},-1)">−</button> <b>${l.qty}</b> <button onclick="q(${k},1)">+</button>${l.orig!=null?`<br><button onclick="tgl(${k})" style="padding:3px 8px;font-size:.8rem;margin-top:4px">${l.price==l.orig?'daj rabat −'+D().p+'%':'bez rabatu'}</button>`:''}</div>
   <input value="${l.price}" onchange="pr(${k},this.value)" inputmode="decimal"></div>`).join('')||'<p class="m">Zeskanuj produkt.</p>';
   $('#sum').textContent=zl(cart.reduce((a,l)=>a+l.qty*l.price,0));
   document.querySelectorAll('.pay button').forEach(b=>b.className=b.dataset.p==pay?'on':'');
@@ -101,7 +107,7 @@ function render(){
   S.pend.filter(s=>s.ev==S.ev).forEach(s=>{const v=s.lines.reduce((a,l)=>a+l.qty*l.price,0);s.pay=='Karta'?T.card+=v:T.cash+=v;if(s.fv)T.fv++});
   $('#tt').textContent=`Gotówka ${zl(T.cash)} zł · Karta ${zl(T.card)} zł · Faktur: ${T.fv}`;
   $('#tb').innerHTML=S.items.filter(i=>(i.sku+i.name).toLowerCase().includes(f)).map(i=>{const L=left(i);
-    return`<tr><td>${i.name}<br><small class="m">${i.sku} · ${zl(i.price)} zł</small></td><td>start ${i.start}</td><td class="${L<=0?'z':L<=2?'lo':''}">zostało ${L}</td></tr>`}).join('')}
+    return`<tr><td>${i.name}<br><small class="m">${i.sku} · ${zl(i.price)} zł${D().p?' → '+zl(dpr(i.price))+' zł':''}</small></td><td>start ${i.start}</td><td class="${L<=0?'z':L<=2?'lo':''}">zostało ${L}</td></tr>`}).join('')}
 async function sync(){if(!S.ev||busy)return;busy=1;msg('Synchronizacja…');
   try{const sales=S.pend.filter(s=>s.ev==S.ev);
     const j=sales.length?await api(0,{a:'sales',ev:S.ev,sales}):await api({a:'event',ev:S.ev});
@@ -140,7 +146,7 @@ $('#scan').onclick=async()=>{if(sc)return stopScan();
     setTimeout(()=>t.startsWith('FT1:')?order(t):add(t),auto?150:0)},()=>{}).catch(e=>{sc=null;$('#cam').style.display='none';$('#scan').textContent='Skanuj kamerą';alert('Kamera: '+e)})};
 $('#man').onkeydown=e=>{if(e.key!='Enter')return;const v=e.target.value.trim();e.target.value='';if(!v)return;if(find(v))return add(v);
   const m=S.items.filter(i=>(i.sku+i.name).toLowerCase().includes(v.toLowerCase())).slice(0,8);
-  $('#res').innerHTML=m.map(i=>`<div class="r" onclick="add('${i.ean}');this.parentNode.innerHTML=''">${i.name} · zostało ${left(i)} · ${zl(i.price)} zł</div>`).join('')||'<p class="m">Brak wyników</p>'};
+  $('#res').innerHTML=m.map(i=>`<div class="r" onclick="add('${i.ean}');this.parentNode.innerHTML=''">${i.name} · zostało ${left(i)} · ${zl(i.price)} zł${D().p?' → '+zl(dpr(i.price))+' zł':''}</div>`).join('')||'<p class="m">Brak wyników</p>'};
 $('#newp').onclick=async()=>{if(!S.ev)return alert('Najpierw wybierz event');const k=prompt('EAN lub SKU produktu spoza listy:');if(!k)return;let p={};
   try{p=await api({a:'prod',q:k})}catch(e){alert(e)}
   const name=prompt('Nazwa produktu:',p.name||'');if(!name)return;
@@ -162,6 +168,9 @@ $('#file').onchange=async e=>{const f=e.target.files[0];if(!f)return;
     alert(`Zaimportowano pozycji: ${j.imported}`+(j.missing.length?`\nNie znaleziono w bazie EAN (${j.missing.length}):\n`+j.missing.slice(0,30).join(', '):'')+(c.price?'\nCena z kolumny: '+c.price:'\nUwaga: brak kolumny z ceną!')+(c.qty?'':'\nUwaga: brak kolumny z ilością (Ilość / Stan / Szt) – stany startowe wyniosą 0!'));
     S.ev=ev;S.items=[];await loadEvs();$('#ev').value=ev;await sync()}catch(x){alert(x)}
   e.target.value=''};
+$('#dp').value=D().p;
+function setDisc(){S.disc={p:Math.min(90,Math.max(0,parseFloat($('#dp').value)||0)),};cart.forEach(l=>{if(!l.man&&l.orig!=null)l.price=dpr(l.orig)});save();render()}
+$('#dp').onchange=setDisc;
 addEventListener('online',sync);setInterval(sync,60000);
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
 render();loadEvs().then(sync);if(!S.url)setTimeout(()=>$('#cfg').click(),300);
