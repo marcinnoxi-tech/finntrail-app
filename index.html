@@ -52,7 +52,7 @@ let S=JSON.parse(localStorage.ft||'{"url":"","tok":"","ev":"","evs":[],"items":[
 const save=()=>localStorage.ft=JSON.stringify(S);
 const zl=n=>n.toFixed(2).replace('.',',');
 const D=()=>({p:(S.disc&&S.disc.p!=null)?S.disc.p:15});
-function dpr(p){return Math.floor(Math.round(p*(100-D().p))/100+1e-9)}
+function dpr(p){return Math.floor(Math.round(p*(100-D().p))/100/10+1e-9)*10}
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const msg=t=>$('#msg').textContent=t;
 async function api(p,body){
